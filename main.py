@@ -3,12 +3,14 @@ import time
 import json
 import random
 import sys, os
+import shutil
+import tempfile
 import requests
 import threading
-import pandas
+import pandas as pd
 import soundfile as sf
 import sounddevice as sd
-from selenium import webdriver
+import undetected_chromedriver as webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.wait import WebDriverWait
@@ -16,24 +18,123 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import WebDriverException
 
 
-def selenium_connect(ads):
-  f = 5
-  # print(selections)
-  open_url = f"http://local.adspower.net:5032{f}/api/v1/browser/start?user_id={ads}"
-  close_url = f"http://local.adspower.net:5032{f}/api/v1/browser/stop?user_id={ads}"
+PROXY = ('proxy.soax.com', 9000, 'mZ7COGLGDP04INBs', 'wifi;;;;')
 
-  resp = requests.get(open_url).json()
-  if resp["code"] != 0:
-    print(resp["msg"])
-    print("please check ads_id")
-    sys.exit()
 
-  chrome_driver = resp["data"]["webdriver"]
-  chrome_options = Options()
-  chrome_options.add_argument("--ignore-certificate-errors")
-  chrome_options.add_experimental_option("debuggerAddress", resp["data"]["ws"]["selenium"])
-  driver = webdriver.Chrome(chrome_driver, options=chrome_options)
-  driver.get('https://nopecha.com/setup#sub_1NnGb4CRwBwvt6ptDqqrDlul|enabled=true|disabled_hosts=%5B%5D|hcaptcha_auto_open=true|hcaptcha_auto_solve=true|hcaptcha_solve_delay=true|hcaptcha_solve_delay_time=3000|recaptcha_auto_open=false|recaptcha_auto_solve=false|recaptcha_solve_delay=false|recaptcha_solve_delay_time=1000|recaptcha_solve_method=Image|funcaptcha_auto_open=true|funcaptcha_auto_solve=true|funcaptcha_solve_delay=true|funcaptcha_solve_delay_time=0|awscaptcha_auto_open=true|awscaptcha_auto_solve=true|awscaptcha_solve_delay=true|awscaptcha_solve_delay_time=0|textcaptcha_auto_solve=true|textcaptcha_solve_delay=true|textcaptcha_solve_delay_time=0|textcaptcha_image_selector=|textcaptcha_input_selector=')
+class ProxyExtension:
+    manifest_json = """
+    {
+        "version": "1.0.0",
+        "manifest_version": 2,
+        "name": "Chrome Proxy",
+        "permissions": [
+            "proxy",
+            "tabs",
+            "unlimitedStorage",
+            "storage",
+            "<all_urls>",
+            "webRequest",
+            "webRequestBlocking"
+        ],
+        "background": {"scripts": ["background.js"]},
+        "minimum_chrome_version": "76.0.0"
+    }
+    """
+
+    background_js = """
+    var config = {
+        mode: "fixed_servers",
+        rules: {
+            singleProxy: {
+                scheme: "http",
+                host: "%s",
+                port: %d
+            },
+            bypassList: ["localhost"]
+        }
+    };
+
+    chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+
+    function callbackFn(details) {
+        return {
+            authCredentials: {
+                username: "%s",
+                password: "%s"
+            }
+        };
+    }
+
+    chrome.webRequest.onAuthRequired.addListener(
+        callbackFn,
+        { urls: ["<all_urls>"] },
+        ['blocking']
+    );
+    """
+
+    def __init__(self, host, port, user, password):
+        self._dir = os.path.normpath(tempfile.mkdtemp())
+
+        manifest_file = os.path.join(self._dir, "manifest.json")
+        with open(manifest_file, mode="w") as f:
+            f.write(self.manifest_json)
+
+        background_js = self.background_js % (host, port, user, password)
+        background_file = os.path.join(self._dir, "background.js")
+        with open(background_file, mode="w") as f:
+            f.write(background_js)
+
+    @property
+    def directory(self):
+        return self._dir
+
+    def __del__(self):
+        shutil.rmtree(self._dir)
+
+
+def read_proxy_file(file_path):
+    with open(file_path, 'r') as file:
+        proxy_lines = file.readlines()
+    return proxy_lines
+
+def choose_random_proxy(proxy_lines):
+    random_proxy = random.choice(proxy_lines).strip()
+    domain, port, login, password = random_proxy.split(':')
+    return (domain, int(port), login, password)
+
+
+def selenium_connect():
+  options = webdriver.ChromeOptions()
+  options.add_argument("--start-maximized")
+  #options.add_argument("--incognito")
+  options.add_argument("--disable-blink-features=AutomationControlled")
+  options.add_argument("--log-level=3")
+  options.add_argument("--disable-web-security")
+  options.add_argument("--disable-site-isolation-trials")
+  options.add_argument('--ignore-certificate-errors')
+  options.add_argument('--lang=EN')
+  #pergfan:6ofKZOXwL7qSTGNZ@proxy.packetstream.io:31112
+  # proxy = choose_random_proxy(read_proxy_file('./proxies.txt'))
+  # proxy_extension = ProxyExtension(*proxy)
+  options.add_argument(f"--load-extension=D:\\projects\\rugby-bot-resale\\NopeCHA")
+
+  prefs = {"credentials_enable_service": False,
+      "profile.password_manager_enabled": False}
+  options.add_experimental_option("prefs", prefs)
+
+  # Create the WebDriver with the configured ChromeOptions
+  driver = webdriver.Chrome(
+      options=options,
+      enable_cdp_events=True,
+  )
+
+  screen_width, screen_height = driver.execute_script(
+      "return [window.screen.width, window.screen.height];")
+  
+  desired_width = int(screen_width / 2)
+  driver.set_window_position(0, 0)
+  driver.set_window_size(desired_width, screen_height)
+  driver.get('https://nopecha.com/setup#sub_1NnGb4CRwBwvt6ptDqqrDlul|enabled=true|disabled_hosts=%5B%5D|hcaptcha_auto_open=true|hcaptcha_auto_solve=true|hcaptcha_solve_delay=true|hcaptcha_solve_delay_time=3000|recaptcha_auto_open=true|recaptcha_auto_solve=true|recaptcha_solve_delay=true|recaptcha_solve_delay_time=1000|recaptcha_solve_method=Image|funcaptcha_auto_open=true|funcaptcha_auto_solve=true|funcaptcha_solve_delay=true|funcaptcha_solve_delay_time=0|awscaptcha_auto_open=true|awscaptcha_auto_solve=true|awscaptcha_solve_delay=true|awscaptcha_solve_delay_time=0|textcaptcha_auto_solve=true|textcaptcha_solve_delay=true|textcaptcha_solve_delay_time=0|textcaptcha_image_selector=|textcaptcha_input_selector=')
   return driver
 
 
@@ -74,49 +175,36 @@ def mchtms(h3):
       return new_h3
 
 
-# def check_for_403(driver):
-#   try:
-#     if driver.find_element(By.TAG_NAME, 'h1').text == "403 ERROR" or driver.find_elements(By.TAG_NAME, 'h1')[3].text == "We are working to restore it as soon as possible":
-#       return True
-#   except: False
-
-
-# def check_for_captcha(driver):
-#     try:
-#         driver.find_element(By.CSS_SELECTOR, '#captcha-container')
-#         return True
-#     except:
-#         return False
-
-
-# def check_for_captcha_and_403(driver):
-#   while True:
-#     if check_for_captcha:
-#       time.sleep(1)
-#       continue
-#     break
-#   while True:
-#     if check_for_403(driver):
-#       print('403')
-#       time.sleep(30)
-#       driver.refresh()
-#       continue
-#     break
-
-
 def pass_data(driver, data, selector):
   while True:
     try:
-      element = check_for_element(driver, selector, click=True)
-      element.clear()
-      for k in data:
+      iframe = driver.find_element(By.CSS_SELECTOR, 'iframe[title=reCAPTCHA]')
+      driver.switch_to.frame(iframe)
+      if not wait_for_element(driver, '#rc-anchor-container', wait=5):
+        driver.switch_to.default_content()
+        element = check_for_element(driver, selector, click=True)
+        if not element: break
+        element.clear()
+        for k in data:
           element.send_keys(k)
           time.sleep(.1)
-      wait_for_element(driver, 'div[data-state="solved"]')
-      contButton = driver.find_element(By.CSS_SELECTOR, '#edit-submit')
-      contButton.click()
-      break
+        contButton = driver.find_element(By.CSS_SELECTOR, '#edit-submit')
+        contButton.click()
+        break
+      else:
+        if not wait_for_element(driver, 'span[id="recaptcha-anchor"][aria-checked="true"]', wait=60): raise Exception
+        driver.switch_to.default_content()
+        element = check_for_element(driver, selector, click=True)
+        if not element: break
+        element.clear()
+        for k in data:
+          element.send_keys(k)
+          time.sleep(.1)
+        contButton = driver.find_element(By.CSS_SELECTOR, '#edit-submit')
+        contButton.click()
+        break
     except:
+      driver.switch_to.default_content()
       driver.refresh()
       continue
 
@@ -126,31 +214,28 @@ def login_page(driver, email, password):
     # check_for_captcha_and_403(driver)
     if check_for_element(driver, 'input[name="name"]'): pass_data(driver, email, 'input[name="name"]')
     if check_for_element(driver, 'input[type="password"]'): pass_data(driver, password, 'input[type="password"]')
-    if driver.current_url != 'https://tickets.rugbyworldcup.com/en/user/login?destination=/en/home': break
+    if 'https://tickets.rugbyworldcup.com/en/user/login' not in driver.current_url: break
 
 
-def read_excel():
-  detx = pandas.read_excel('r.xlsx').values.tolist()
-  detx = pandas.read_excel('r.xlsx').values.tolist()
-  selections = []
+def read_excel(file_path):
+    df = pd.read_excel(file_path)
+    matches_data = []
 
-  for x in detx:
-    ttl = x[1]
-    dct = {}
-    ctgs = []
+    for i in range(len(df)):
+        match_info = df.iloc[i, :].tolist()
+        match_data = {
+            "match": match_info[1],
+            "categories": {
+                1: match_info[2],
+                2: match_info[3],
+                3: match_info[4],
+                4: match_info[5]
+            },
+            "link": match_info[6]
+        }
+        matches_data.append(match_data)
 
-    for i, y in enumerate(x[2:]):
-      if i < 4:  # Check if i is within the valid range
-        i = [1, 2, 3, 4][::-1][i]
-        try:
-          dct[str(i)] = int(y)
-          ctgs.append(i)
-        except:
-          pass
-
-    if ctgs != []:
-      selections.append([ttl, dct, ctgs])
-  return selections
+    return matches_data
 
 
 def choose_match(driver, selections):
@@ -167,6 +252,7 @@ def choose_match(driver, selections):
 
 def get_cart_data(driver, email, password, name):
   try:
+    data = []
     info_head = driver.find_elements(By.CSS_SELECTOR, '#cart-summary-form > ul > li')
     for info in info_head:
       price = info.find_element(By.CSS_SELECTOR, 'div.product-unit-price.d-none.d-lg-flex')
@@ -204,59 +290,95 @@ def success(driver, email, password, name):
   time.sleep(1200)
 
 
-def main(email, password, ads, name):
-  driver = selenium_connect(ads)
-  base_url = 'https://tickets.rugbyworldcup.com/en'
-  selections = read_excel()
+def get_random_email_and_password(file_path):
+  emails_and_passwords = []
+
+  # Read the file and extract emails and passwords
+  with open(file_path, 'r') as file:
+    for line in file:
+      email, password = line.strip().split('````')
+      emails_and_passwords.append((email, password))
+
+  # Choose a random email and password
+  random_email, random_password = random.choice(emails_and_passwords)
+  return random_email, random_password
+
+
+def main(link, categories):
+  driver = selenium_connect()
+  
   while True:
-    driver.get(base_url)
-    # check_for_captcha_and_403(driver)
+    driver.get(link)
+    email, password = get_random_email_and_password('./accounts.txt')
+    print(email, password)
+    while True:
+        if check_for_element(driver, '#captcha-container'): time.sleep(5)
+        else: break
+    while True:
+        if check_for_element(driver, "//*[contains(text(), '403 ERROR')]", xpath=True): 
+            time.sleep(30)
+            continue
+        else: break
     wait_for_element(driver, '#onetrust-accept-btn-handler', wait=3, click=True)
     if check_for_element(driver, 'a[class="btn user-account-login"]', click=True): login_page(driver, email, password)
-    t, match_data = choose_match(driver, selections)
-    t1 = t[0]
-    t2 = t[-1]
-    if not check_for_element(driver, f'//*[@class="list-ticket-content"][.//span[1][contains(text(),"{t1}")]][.//span[3][contains(text(),"{t2}")]]//*[contains(text(),"View")]', click=True, xpath=True): continue
-    if not check_for_element(driver, '//*[@role="dialog"]//*[@class="ticketing-info"]/a', click=True, xpath=True): continue
-    # check_for_captcha_and_403(driver)
+    
     if not check_for_element(driver, '//*[@class="ticket-category-list js-block-list-categories"]//li[not(.//*[contains(text(),"Unavailable")])]', xpath=True): continue
     avctg = [int(re.compile('\d').findall(c.text)[-1]) for c in driver.find_elements(By.XPATH, '//*[@class="ticket-category-list js-block-list-categories"]//li[not(.//*[contains(text(),"Unavailable")])]//div[@class="title"]')]
-    wanted = [x1 for x1 in match_data[-1] if x1 in avctg]
-    
+    wanted = []
+    for key in categories.keys():
+      if key in avctg:
+        check_for_element(driver, f'//*[@class="filter-wrapper info-category"]//*[@class="first-letter-cap"][contains(text(),"Y {key}")]', click=True, xpath=True)
+        wanted.append(key)
     if wanted == []:
       print('no match')
       continue
-    category = str(random.choice(wanted))
+    category = int(random.choice(wanted))
     if not check_for_element(driver, f'//*[@class="ticket-category-list js-block-list-categories"]//li[not(.//*[contains(text(),"Unavailable")])]//*[contains(text(),"Y {category}")]', click=True, xpath=True): continue
-    seats = match_data[1][category]
-    for _ in range(0, seats): check_for_element(driver, '//*[@class="ticket-category-list js-block-list-categories"]//li[not(.//*[contains(text(),"Unavailable")])]//span[@class="operator more active"]', click=True, xpath=True)
+    for _ in range(0, int(categories[category])): check_for_element(driver, '//*[@class="ticket-category-list js-block-list-categories"]//li[not(.//*[contains(text(),"Unavailable")])]//span[@class="operator more active"]', click=True, xpath=True)
     check_for_element(driver, '//*[@class="ticket-category-list js-block-list-categories"]//li[not(.//*[contains(text(),"Unavailable")])]//button[@class="btn btn-primary js-category-auto noloader"]', click=True, xpath=True)
     if driver.current_url == 'https://tickets.rugbyworldcup.com/en/cart': 
-      success(driver, email, password, name)
+      success(driver, email, password, 'general')
       print('waiting for 20 min')
       time.sleep(1200)
     
 
 if __name__ == "__main__":
-  try: file = open('accounts.txt', 'r', encoding='utf-8').readlines()
-  except Exception as e:
-    print('Не можу розпiзнати, що написано в accounts.txt!')
-    print(e)
-    time.sleep(15)
-    exit()
-  
+  matches_data = read_excel("./r.xlsx")
   threads = []
-  for el in file:
-    data = el.strip()
-    email, password, ads, name = data.split('````')
-    print(email, password, ads, name)
+  option = input('Choose one option [ONE|ALL]: ')
+  if option in ["all", "ALL"]: 
+    for row in matches_data:
+      link = row["link"]
+      if not pd.notna(link): continue
+      categories = row["categories"]
+      types = []
+      for value in categories.values():
+          if pd.notna(value): types.append(value)
+      if types == []: continue
+      match = row["match"]
+      thread = threading.Thread(target=main, args=(link, categories))
+      thread.start()
+      threads.append(thread)
 
-    thread = threading.Thread(target=main, args=(email, password, ads, name,))
+
+      delay = random.uniform(5, 10)
+      time.sleep(delay)
+    for thread in threads:
+      thread.join()
+  elif option in ['one', 'ONE']:
+    for row_index in range(len(matches_data)):
+      link = matches_data[row_index]["link"]
+      if not pd.notna(link): continue
+      categories = matches_data[row_index]["categories"]
+      types = []
+      for value in categories.values():
+          if pd.notna(value): types.append(value)
+      if types == []: continue
+      match = matches_data[row_index]["match"]
+      print(row_index, match)
+    row_index = input('Index: ')
+    link = matches_data[int(row_index)]['link']
+    categories = matches_data[int(row_index)]['categories']
+    thread = threading.Thread(target=main, args=(link,categories))
     thread.start()
     threads.append(thread)
-
-    delay = random.uniform(5, 10)
-    time.sleep(delay)
-  
-  for thread in threads:
-    thread.join()
